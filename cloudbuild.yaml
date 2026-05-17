@@ -1,0 +1,50 @@
+steps:
+  # 1. Build Backend Image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'us-central1-docker.pkg.dev/${PROJECT_ID}/enterprise-rag-repo/backend:latest'
+      - '-f'
+      - 'docker/backend.Dockerfile'
+      - '.'
+
+  # 2. Build UI Image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'us-central1-docker.pkg.dev/${PROJECT_ID}/enterprise-rag-repo/ui:latest'
+      - '-f'
+      - 'docker/ui.Dockerfile'
+      - '.'
+
+  # 3. Build Ingestion Worker Image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'us-central1-docker.pkg.dev/${PROJECT_ID}/enterprise-rag-repo/ingestion:latest'
+      - '-f'
+      - 'docker/ingestion.Dockerfile'
+      - '.'
+
+  # 4. Build Evals Image (RAGAS + Vertex AI + Streamlit — no PyTorch)
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'us-central1-docker.pkg.dev/${PROJECT_ID}/enterprise-rag-repo/evals:latest'
+      - '-f'
+      - 'docker/evals.Dockerfile'
+      - '.'
+
+# Push all images to Artifact Registry
+images:
+  - 'us-central1-docker.pkg.dev/${PROJECT_ID}/enterprise-rag-repo/backend:latest'
+  - 'us-central1-docker.pkg.dev/${PROJECT_ID}/enterprise-rag-repo/ui:latest'
+  - 'us-central1-docker.pkg.dev/${PROJECT_ID}/enterprise-rag-repo/ingestion:latest'
+  - 'us-central1-docker.pkg.dev/${PROJECT_ID}/enterprise-rag-repo/evals:latest'
+
+# Give Cloud Build enough time for the evals image (PyTorch download is slow)
+timeout: '7200s'

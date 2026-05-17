@@ -24,6 +24,7 @@ nest_asyncio.apply()
 from evals.pipeline import run_pipeline, load_golden_dataset
 from evals.guardrails_eval import run_guardrails_eval, compute_guardrails_metrics
 from evals.metrics import run_all_metrics
+from evals.store import save_eval_run, list_eval_runs, load_eval_run
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Page config
@@ -112,8 +113,8 @@ st.divider()
 # ─────────────────────────────────────────────────────────────────────────────
 # Tabs
 # ─────────────────────────────────────────────────────────────────────────────
-tab1, tab2, tab3 = st.tabs(
-    ["📋 Step 1 — Ground Truth", "🚀 Step 2 — Live Pipeline", "📊 Step 3 — Eval Metrics"]
+tab1, tab2, tab3, tab4 = st.tabs(
+    ["📋 Step 1 — Ground Truth", "🚀 Step 2 — Live Pipeline", "📊 Step 3 — Eval Metrics", "📈 History"]
 )
 
 
@@ -171,9 +172,9 @@ with tab1:
 with tab2:
     st.subheader("Live Pipeline — Collect Real Responses")
     st.markdown(
-        "Sends each golden question to your **running FastAPI app** (`localhost:8000/query`). "
+        "Sends each golden question to your **FastAPI backend** (auto-resolved from `BACKEND_URL`). "
         "Captures the actual response, retrieved contexts, and tool called. "
-        "Responses are truncated to 300 chars to save tokens for the RAGAS judging step."
+        "Responses are summarized via Groq to preserve key facts for the RAGAS judging step."
     )
     st.info(
         "⚠️ Make sure your FastAPI backend is running first: `uvicorn app.main:app --reload --port 8000`",
@@ -337,6 +338,12 @@ with tab3:
             icon="ℹ️",
         )
 
+        run_label = st.text_input(
+            "Run label (optional)",
+            placeholder="e.g. v2-redis-cache, post-ingestion-fix",
+            help="Tag this run so you can identify it in History.",
+        )
+
         run_metrics_btn = st.button(
             "▶️ Run Eval Metrics",
             type="primary",
@@ -368,6 +375,12 @@ with tab3:
                 st.session_state.metric_results = metric_results
 
             status_slot.success("✅ All 6 experiments complete!")
+
+            gcs_uri = save_eval_run(metric_results, label=run_label)
+            if gcs_uri:
+                st.caption(f"💾 Saved to GCS: `{gcs_uri}`")
+            else:
+                st.caption("💾 GCS not configured — results in session only (set GCP_PROCESSED_BUCKET to persist).")
 
             for key, title in metric_display_names.items():
                 if key in metric_results:
@@ -425,3 +438,71 @@ with tab3:
                 for name, score in summary
             ])
             st.dataframe(summary_df, use_container_width=True, hide_index=True)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# TAB 4 — History
+# ═════════════════════════════════════════════════════════════════════════════
+with tab4:
+    st.subheader("Eval History — Past Runs")
+    st.markdown("All evaluation runs saved to GCS. Select any run to inspect its scores.")
+
+    if st.button("🔄 Refresh", key="refresh_history"):
+        st.rerun()
+
+    runs = list_eval_runs()
+
+    if not runs:
+        st.info("No past runs found. Either GCP_PROCESSED_BUCKET is not set, or no evals have been saved yet.")
+    else:
+        # ── Trend chart — averages across all runs ────────────────────────────
+        st.subheader("Score Trends Over Time")
+        METRIC_KEYS = [
+            "faithfulness", "answer_relevancy", "context_precision",
+            "context_recall", "answer_correctness", "tool_correctness",
+        ]
+        trend_rows = []
+        for run in reversed(runs):
+            row = {"Run": run["label"][:30]}
+            for key in METRIC_KEYS:
+                row[key.replace("_", " ").title()] = run["averages"].get(key)
+            trend_rows.append(row)
+
+        trend_df = pd.DataFrame(trend_rows).set_index("Run")
+        st.line_chart(trend_df, use_container_width=True)
+
+        st.divider()
+
+        # ── Per-run detail viewer ─────────────────────────────────────────────
+        st.subheader("Inspect a Specific Run")
+        run_options = {f"{r['label']} ({r['timestamp']})": r for r in runs}
+        selected_label = st.selectbox("Select run", list(run_options.keys()))
+        selected_run = run_options[selected_label]
+
+        col_a, col_b = st.columns(2)
+        with col_a:
+            st.markdown(f"**Timestamp:** `{selected_run['timestamp']}`")
+            st.markdown(f"**Label:** `{selected_run['label']}`")
+        with col_b:
+            avgs = selected_run["averages"]
+            for key, val in avgs.items():
+                st.markdown(f"**{key.replace('_', ' ').title()}:** {_badge(val)} `{val:.3f}`")
+
+        if st.button("📥 Load full per-question breakdown", key="load_run"):
+            data = load_eval_run(selected_run["path"])
+            if data:
+                per_q = data.get("per_question", {})
+                DISPLAY = {
+                    "faithfulness":      "Faithfulness",
+                    "answer_relevancy":  "Answer Relevancy",
+                    "context_precision": "Context Precision",
+                    "context_recall":    "Context Recall",
+                    "answer_correctness":"Answer Correctness",
+                    "tool_correctness":  "Tool Correctness",
+                }
+                for key, title in DISPLAY.items():
+                    if key in per_q:
+                        df = pd.DataFrame(per_q[key])
+                        _render_metric_table(df, key, title)
+            else:
+                st.error("Failed to load run from GCS.")

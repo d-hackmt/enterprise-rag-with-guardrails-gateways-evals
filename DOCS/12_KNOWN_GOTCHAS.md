@@ -67,6 +67,77 @@ This guarantees that Logfire is fully awake and tracing before the rest of the a
 
 ---
 
+## 5. Eventarc Service Agent — Creation Race Condition
+
+**The Issue:**
+When running `terraform apply` for the first time, the Eventarc trigger creation fails with a 403 or 400 error referencing the Eventarc service agent SA even though `eventarc.googleapis.com` was just enabled.
+
+**The Reason:**
+GCP creates the Eventarc service agent SA (`service-{NUMBER}@gcp-sa-eventarc.iam.gserviceaccount.com`) **asynchronously** after the API is enabled. If Terraform immediately tries to bind `roles/eventarc.serviceAgent` to it, the SA may not exist yet and the IAM grant fails. There is no reliable synchronous CLI command to trigger creation (both `gcloud beta services identity create` and `gcloud services identity create` either require a beta component or don't exist in older SDK versions).
+
+**The Solution:**
+Use the `hashicorp/time` provider to insert a 30-second pause after the APIs are enabled, before the IAM binding runs:
+
+```hcl
+# terraform/main.tf
+resource "time_sleep" "wait_for_eventarc_sa" {
+  create_duration = "30s"
+  depends_on      = [google_project_service.services]
+}
+
+resource "google_project_iam_member" "eventarc_service_agent" {
+  project    = var.project_id
+  role       = "roles/eventarc.serviceAgent"
+  member     = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-eventarc.iam.gserviceaccount.com"
+  depends_on = [time_sleep.wait_for_eventarc_sa]
+}
+```
+
+After adding the `hashicorp/time` provider to `provider.tf`, run `terraform init` to download it before `terraform apply`.
+
+---
+
+## 6. HCL Semicolons in `env` Blocks
+
+**The Issue:**
+Terraform `plan` or `apply` fails with a parse error when `env` blocks in Cloud Run service definitions use semicolons:
+
+```hcl
+# ❌ INVALID HCL
+env { name = "PROJECT_ID"; value = var.project_id }
+```
+
+**The Reason:**
+HCL does not allow multiple arguments on one line separated by semicolons inside block bodies. Each argument must be on its own line.
+
+**The Solution:**
+Expand every `env` block to multi-line format:
+
+```hcl
+# ✅ CORRECT
+env {
+  name  = "PROJECT_ID"
+  value = var.project_id
+}
+```
+
+---
+
+## 7. `terraform.tfvars` — Never Commit Secrets
+
+**The Issue:**
+`terraform.tfvars` contains plaintext API keys (`groq_api_key`, `qdrant_api_key`, `db_password`, etc.). If accidentally committed, these leak to anyone who can read the repository.
+
+**The Reason:**
+Terraform reads `terraform.tfvars` automatically — it's designed to hold the actual values for variables defined in `variables.tf`. There is no built-in secrets management; values are plaintext.
+
+**The Solution:**
+- `terraform.tfvars` is in `.gitignore` — verify it stays excluded before every commit
+- A `terraform.tfvars.example` file with placeholder values is tracked in git so students know what fields to fill
+- On CI/CD, use environment variables (`TF_VAR_groq_api_key=...`) rather than committing tfvars
+
+---
+
 ## 4. The "Lazy Loading" Pattern (Vertex AI & FlashRank)
 
 **The Issue:**

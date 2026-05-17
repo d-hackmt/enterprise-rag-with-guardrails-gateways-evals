@@ -95,23 +95,24 @@ flowchart TD
     K --> L[Exp 5: Answer Correctness\nbatch 1 → 45s → batch 2 + 60s]
     L --> M[Exp 6: Tool Correctness\nno LLM — instant ⚡]
 
-    M --> N[📊 Streamlit Dashboard\nScores + Summary]
-    F --> N
+    M --> N[💾 GCS Save\neval-results/ in processed bucket]
+    N --> O[📊 Streamlit Dashboard\n4 tabs: Ground Truth / Pipeline / Metrics / History]
+    F --> O
 ```
 
 ### Phase 1 — Live Response Generation
 
 For each of the 15 golden questions, `evals/pipeline.py`:
-1. Sends a `POST /query` request to the running FastAPI app (`localhost:8000`)
-2. Captures `answer` (truncated to 300 chars), `sources` (actual retrieved chunks), `thought_process`
+1. Sends a `POST /query` request to the backend (`BACKEND_URL` env var, defaults to `localhost:8000`)
+2. Captures `answer` (summarized via Groq `llama-3.1-8b-instant` for long responses), `sources` (actual retrieved chunks), `thought_process`
 3. Parses `thought_process` to detect which tool was called:
    - `"Intent: Technical"` → `retrieve_documents`
    - `"Intent: Conversational/Memory"` → `direct_answer`
    - `"Intent: Guardrails Fired"` → `guardrails`
 4. Waits 10 seconds between calls (Groq RPM buffer on the main key)
 
-> **Why truncate to 300 chars?**  
-> RAGAS judges the response against the context. 300 chars is enough for the LLM judge to evaluate faithfulness and relevancy. Passing the full response would double the token cost with no accuracy gain.
+> **Why summarize instead of truncate?**  
+> Truncating to 300 chars cuts facts mid-sentence, causing artificially low RAGAS scores (Faithfulness, Answer Correctness). `pipeline.py` calls Groq `llama-3.1-8b-instant` to produce a 3–5 bullet-point summary that preserves all specific numbers, names, and technical claims in ~150 words. Responses shorter than 400 chars are passed through unchanged. The summary model uses the `JUDGE_GROQ` key so it never touches the production key.
 
 ### Guardrails Evaluation
 
@@ -254,16 +255,18 @@ The Streamlit app uses `nest_asyncio.apply()` to allow async code to run from wi
 | Phase | Duration |
 |-------|----------|
 | Phase 1 — 21 calls × 10s spacing | ~3.5 min |
-| Phase 2 — 5 experiments × 15 samples × 40s waits + 4 × 62s inter-experiment cooldowns | ~50 min |
-| **Total** | **~54 min** |
+| Phase 2 — 5 experiments × 15 samples × (processing + 40s cooldown) + 4 × 62s inter-experiment | ~70 min |
+| **Total** | **~75 min** |
 
-> Phase 2 is long by design — the 6,000 TPM on_demand ceiling forces per-sample pacing. Upgrade JUDGE_GROQ to Groq Dev Tier (100k TPM) to bring Phase 2 down to ~5 min.
+> Phase 2 is long by design — the 6,000 TPM on_demand ceiling forces per-sample pacing. Upgrade JUDGE_GROQ to Groq Dev Tier (100k TPM) to bring Phase 2 down to ~5 min. Actual runtime may vary ±10 min depending on API latency and any exponential-backoff retries on 429 responses.
 
 ---
 
 ## Part 5 — How to Run
 
-```powershell
+### Local (development)
+
+```bash
 # Terminal 1 — start the FastAPI backend
 uvicorn app.main:app --reload --port 8000
 
@@ -271,9 +274,17 @@ uvicorn app.main:app --reload --port 8000
 streamlit run evals/app.py
 ```
 
-Then open `http://localhost:8501` and follow the 3 tabs:
+Then open `http://localhost:8501` and follow the 4 tabs:
+
 1. **Ground Truth** — review the 15 golden Q&A pairs and 6 guardrails tests
-2. **Live Pipeline** — click "Run Live Pipeline" to collect real responses
-3. **Eval Metrics** — click "Run Eval Metrics" to score with RAGAS (takes ~50 min on free tier)
+2. **Live Pipeline** — click "Run Live Pipeline" to collect real responses (Phase 1 — ~3.5 min)
+3. **Eval Metrics** — click "Run Eval Metrics" to score with RAGAS (Phase 2 — ~70 min on free Groq tier)
+4. **History** — view all past eval runs stored in GCS; compare scores across runs with a trend chart
+
+### Cloud Run (production)
+
+The evals service is deployed to its own Cloud Run service (`{app_name}-evals`). Open the Cloud Run URL in a browser — it's the same Streamlit app. The `BACKEND_URL` env var is automatically set to the backend Cloud Run URL by Terraform, so Phase 1 will call the production backend.
+
+> After each successful eval run, results are saved to `gs://{processed_bucket}/eval-results/` as a JSON file. The History tab loads these on startup — past runs persist across Cloud Run restarts.
 
 All traces are visible in **Logfire** under `service = evals`.

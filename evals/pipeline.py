@@ -1,10 +1,15 @@
 """
 Phase 1 — Live Pipeline.
 Calls the running FastAPI /query endpoint for each golden sample.
-Captures: actual_response (truncated to 300 chars), actual_contexts (from sources),
-and actual_tools_called (detected from thought_process).
-"""
+Captures: actual_response (summarized via Groq to preserve key facts),
+          actual_contexts (from sources), actual_tools_called (from thought_process).
 
+Why summarize instead of truncate:
+  Truncating to 300 chars cuts off facts mid-sentence, causing artificially low
+  RAGAS scores (AnswerCorrectness, Faithfulness). Summarizing preserves all key
+  claims in ~150-200 words, keeping token usage low while giving RAGAS accurate
+  material to judge against the ground truth reference.
+"""
 
 import time
 import copy
@@ -12,12 +17,55 @@ import json
 import os
 import requests
 import logfire
+from openai import OpenAI
 
-API_URL = "http://localhost:8000/query"
-RESPONSE_TRUNCATE = 300
-DELAY_BETWEEN_CALLS = 10  # seconds — stays within Groq RPM on the main key
+API_URL = os.getenv("BACKEND_URL", "http://localhost:8000") + "/query"
+DELAY_BETWEEN_CALLS = 10   # seconds between /query calls — stays within Groq RPM on main key
+SUMMARIZE_THRESHOLD = 400  # chars — answers shorter than this are used as-is
+SUMMARY_MAX_TOKENS  = 250  # max tokens for the Groq summary call
+
+GROQ_BASE_URL  = "https://api.groq.com/openai/v1"
+SUMMARY_MODEL  = "llama-3.1-8b-instant"   # fast + cheap model for summarization
 
 
+def _get_summary_client() -> OpenAI:
+    """Groq client for the summarization step — uses JUDGE_GROQ to avoid touching the prod key."""
+    key = os.getenv("JUDGE_GROQ") or os.getenv("GROQ_API_KEY")
+    return OpenAI(api_key=key, base_url=GROQ_BASE_URL)
+
+
+def _summarize_for_eval(answer: str, question: str) -> str:
+    """
+    Converts a long RAG answer into a compact factual summary for RAGAS evaluation.
+    Preserves specific numbers, names, and technical claims — the things RAGAS judges on.
+    Falls back to a 600-char slice if Groq is unavailable.
+    """
+    if not answer or len(answer) <= SUMMARIZE_THRESHOLD:
+        return answer
+
+    prompt = (
+        f"Summarize the following answer to the question in 3-5 bullet points.\n"
+        f"Rules: preserve ALL specific facts, numbers, names, and technical details. "
+        f"Do NOT add information not present in the answer. Be concise.\n\n"
+        f"Question: {question}\n\n"
+        f"Answer: {answer}\n\n"
+        f"Bullet-point summary:"
+    )
+
+    try:
+        client = _get_summary_client()
+        resp = client.chat.completions.create(
+            model=SUMMARY_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=SUMMARY_MAX_TOKENS,
+            temperature=0,
+        )
+        summary = resp.choices[0].message.content.strip()
+        logfire.info(f"📝 Summarized answer: {len(answer)} chars → {len(summary)} chars")
+        return summary
+    except Exception as e:
+        logfire.warning(f"⚠️ Summarization failed (using first 600 chars): {e}")
+        return answer[:600]
 
 
 def detect_tool(thought_process: list) -> str:
@@ -68,31 +116,33 @@ def run_pipeline(golden_dataset: dict, progress_callback=None) -> dict:
                     resp.raise_for_status()
                     data = resp.json()
 
-                    raw_answer = data.get("answer") or ""
+                    raw_answer     = data.get("answer") or ""
                     thought_process = data.get("thought_process") or []
-                    sources = data.get("sources") or []
+                    sources        = data.get("sources") or []
 
-                    sample["actual_response"] = raw_answer[:RESPONSE_TRUNCATE]
-                    sample["actual_contexts"] = sources[:5]
+                    # Summarize instead of truncate — preserves factual claims for RAGAS
+                    sample["actual_response"]    = _summarize_for_eval(raw_answer, question)
+                    sample["actual_contexts"]    = sources[:5]
                     sample["actual_tools_called"] = [detect_tool(thought_process)]
 
                     logfire.info(
                         "✅ Response captured",
                         tool=sample["actual_tools_called"][0],
-                        response_chars=len(raw_answer),
+                        original_chars=len(raw_answer),
+                        stored_chars=len(sample["actual_response"]),
                         context_chunks=len(sources),
                     )
 
                 except requests.exceptions.ConnectionError:
                     logfire.error("❌ Cannot reach FastAPI — is the app running on :8000?")
-                    sample["actual_response"] = ""
-                    sample["actual_contexts"] = sample.get("relevant_contexts", [])
+                    sample["actual_response"]    = ""
+                    sample["actual_contexts"]    = sample.get("relevant_contexts", [])
                     sample["actual_tools_called"] = ["unknown"]
 
                 except Exception as e:
                     logfire.error(f"❌ Query failed: {e}")
-                    sample["actual_response"] = ""
-                    sample["actual_contexts"] = sample.get("relevant_contexts", [])
+                    sample["actual_response"]    = ""
+                    sample["actual_contexts"]    = sample.get("relevant_contexts", [])
                     sample["actual_tools_called"] = ["unknown"]
 
             if progress_callback:
@@ -107,8 +157,8 @@ def run_pipeline(golden_dataset: dict, progress_callback=None) -> dict:
 def save_results(dataset: dict, path: str) -> None:
     with open(path, "w") as f:
         json.dump(dataset, f, indent=2)
-        
-        
+
+
 def load_golden_dataset() -> dict:
     golden_path = os.path.join(os.path.dirname(__file__), "golden_dataset.json")
     with open(golden_path) as f:

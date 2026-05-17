@@ -316,7 +316,7 @@ Judge input:  question + retrieved_contexts + response
 Judge output: 0.73 + reasoning
 ```
 
-**Used by:** RAGAS (Faithfulness, Relevancy, Precision, Recall, Correctness), DeepEval, TruLens
+**Used by:** RAGAS (Faithfulness, Relevancy, Precision, Recall, Correctness), TruLens
 
 | Pros | Cons |
 |---|---|
@@ -543,7 +543,7 @@ graph TD
 | 3 | **Context Precision** | RAGAS | Are the useful chunks ranked above the noisy ones? | Best chunks ranked first |
 | 4 | **Context Recall** | RAGAS | Did the retriever fetch all facts the reference answer needs? | Nothing important missed |
 | 5 | **Answer Correctness** | RAGAS | Does the answer match the known ground-truth reference? | Factually identical |
-| 6 | **Tool Correctness** | DeepEval | Did the agent call the right tools (no more, no less)? | Exact tool match |
+| 6 | **Tool Correctness** | Rule-Based (Jaccard) | Did the agent call the right tools (no more, no less)? | Exact tool match |
 
 ---
 
@@ -647,7 +647,7 @@ graph TD
 | We want separate metrics per failure mode | 5 independent scores, not one combined number |
 | Token cost | `llama-3.1-8b-instant` as judge keeps costs near zero |
 
-**DeepEval is used for Tool Correctness only** — because RAGAS doesn't have a tool testing metric, and DeepEval's Jaccard-based tool check is deterministic (zero LLM cost).
+**Tool Correctness uses pure Jaccard math** — RAGAS has no tool testing metric. A simple set-overlap calculation (`called ∩ expected / called ∪ expected`) is deterministic: zero LLM calls, zero cost, no library needed. deepeval was removed from the project to eliminate its PyTorch transitive dependency.
 
 ---
 
@@ -959,7 +959,7 @@ This isolation means a heavy eval run can never rate-limit your production syste
 | Tip | Why |
 |---|---|
 | Use `llama-3.1-8b-instant` as judge, not `70b` | Both on on_demand tier share 6,000 TPM — 8b is faster so retries cost less |
-| Use local HuggingFace embeddings | Zero token cost for Answer Relevancy + Correctness embedding step |
+| Use Vertex AI text-embedding-004 for RAGAS embeddings | Same model as production — no sentence-transformers, no PyTorch, no extra dependency |
 | Keep samples small (3 per experiment) | Enough to validate metric behaviour, stays well within limits |
 | Tool Correctness last — no cooldown needed | Zero LLM calls — can run immediately after Exp 5 |
 | 60s cooldown after each LLM experiment | Guarantees the 1-minute window fully resets |
@@ -1027,12 +1027,14 @@ This penalises **both** missing tools (recall failure) and extra tools (precisio
 ```
 ragas version      → 0.4.3
 judge LLM          → llm_factory("llama-3.1-8b-instant", provider="openai", client=AsyncOpenAI(...))
-embeddings         → HuggingFaceEmbeddings(model="sentence-transformers/all-MiniLM-L6-v2", use_api=False)
+embeddings         → LangchainEmbeddingsWrapper(VertexAIEmbeddings("text-embedding-004"))
 scoring call       → await metric.abatch_score(list_of_dicts)   ← NOT evaluate()
 score extraction   → float(result.value)
-cooldown           → 60s async sleep between experiments (Groq rate limit)
+batch size         → GENERAL_BATCH_SIZE=1  (one sample at a time — prevents TPM bursts)
+cooldown (mini)    → 40s asyncio.sleep between samples within an experiment
+cooldown (std)     → 62s asyncio.sleep between experiments
 judge key          → JUDGE_GROQ env var (separate from main GROQ_API_KEY)
-tool correctness   → manual Jaccard — no DeepEval ToolCorrectnessMetric (requires OpenAI key)
+tool correctness   → pure Jaccard (set overlap) — no library, no LLM, zero cost
 ```
 
 ---

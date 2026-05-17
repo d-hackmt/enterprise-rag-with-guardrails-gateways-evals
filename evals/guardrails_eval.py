@@ -5,12 +5,13 @@ Classifies each result as TP / TN / FP / FN and computes precision + recall.
 """
 
 
+import os
 import time
 import copy
 import requests
 import logfire
 
-API_URL = "http://localhost:8000/query"
+API_URL = os.getenv("BACKEND_URL", "http://localhost:8000") + "/query"
 
 
 def _is_blocked(response_json: dict) -> bool:

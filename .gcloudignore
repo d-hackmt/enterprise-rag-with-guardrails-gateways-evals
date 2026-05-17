@@ -1,5 +1,5 @@
-# This file controls what gets uploaded to Cloud Build (source tarball).
-# Only app/ and requirements.txt are needed to build the Docker image.
+# Controls what gets uploaded to the Cloud Build source tarball.
+# Cloud Build needs: app/, evals/, ui/, docker/, requirements-*.txt, cloudbuild.yaml
 .gcloudignore
 
 # Python artifacts
@@ -13,7 +13,7 @@ build/
 dist/
 wheels/
 
-# Virtual environments (huge — never needed)
+# Virtual environments (huge — never needed in builds)
 venv/
 .venv/
 env/
@@ -23,7 +23,6 @@ tenvv/
 
 # Secrets
 .env
-commands.md
 
 # Git & IDE
 .git/
@@ -38,19 +37,20 @@ commands.md
 # Claude Code memory
 .claude/
 
-# Data — lives in GCS, not needed for the build
+# Data — lives in GCS, not needed for builds
 DATA/
 
-# Eval suite — local only
-evals/
+# Terraform — IaC only, run locally; tfvars contains secrets
+terraform/
 
-# Streamlit UI — local only
-ui/
-
-# Notebooks & docs
+# Docs & planning files — not needed for builds
 notebooks/
 DOCS/
+UPDATES TO DO DOCS/
 README.md
+ARCHITECTURE.md
+commands.md
+commands_scalable.md
 
 # OS
 .DS_Store

@@ -1,105 +1,113 @@
-# 🔒 VPC Networking: Street vs. Private Office
+# VPC Networking: How Cloud Run Reaches Private Services
 
-This document explains the networking architecture of the project in simple terms, focusing on the **VPC (Virtual Private Cloud)** and the **VPC Connector**.
-
----
-
-## 🏙️ The "Street" vs. The "Office"
-
-To understand cloud networking, imagine this scenario:
-
-1.  **The Public Internet (The Street)**: This is a public space. Anyone can see you, and anyone can try to talk to you.
-2.  **The VPC (Your Private Office)**: This is a locked building that you own. Only your invited "employees" (services) are allowed inside.
-3.  **Cloud Run (The Employee)**: This is your application code running in a container.
-
-### The Problem
-By default, **Cloud Run** lives on the "Street." It can talk to anyone on the internet (like Groq or Qdrant Cloud) very easily. 
-
-However, your **Cloud SQL Database** or **Redis Cache** lives inside your **Private Office (VPC)**. They are locked away so that hackers on the "Street" cannot even find them. Because Cloud Run is on the street and the Database is in the office, they cannot talk to each other.
+This document explains how Cloud Run services communicate privately with Cloud SQL and Redis without going over the public internet.
 
 ---
 
-## 🚇 The Solution: The VPC Connector (The Tunnel)
+## The Problem: Cloud Run vs Private Services
 
-The **VPC Connector** is like a **Private Tunnel** that connects the Street directly into your Office.
+By default, Cloud Run containers run in Google's managed environment — outside your project's VPC. Redis (Memorystore) and Cloud SQL are provisioned with private IP addresses inside your VPC and are invisible to the public internet.
 
-When we deploy Cloud Run with the `--vpc-connector` flag, we are giving our container a "Key" to that tunnel. It allows the container to reach into the private VPC and talk to the database securely, without ever having to step out into the public internet.
+```
+Cloud Run (outside VPC)  ←— cannot reach —→  Redis 10.x.x.x (inside VPC)
+```
 
-### Network Flow Diagram
+There are two ways to bridge this gap:
+
+| Approach | How | Cost | Speed |
+|---|---|---|---|
+| **VPC Access Connector** (old) | A shared, managed proxy resource deployed into a subnet | Extra cost (~$50+/month for idle connector) | Slower — traffic hops through connector |
+| **Direct VPC Egress** (our approach) | Container network interface attached directly to the VPC subnet | No extra resource — included in Cloud Run gen2 | Faster — direct layer 3 routing |
+
+---
+
+## Our Solution: Direct VPC Egress
+
+Instead of routing traffic through a VPC Connector, we attach the Cloud Run container directly to a VPC subnet using the `network_interfaces` block in Terraform. This gives the container a private IP address inside the VPC — it can reach Redis, Cloud SQL, and any other VPC-internal resource directly.
 
 ```mermaid
 graph LR
-    subgraph "Public Internet (The Street)"
+    subgraph Public Internet
         User([User])
         Groq[[Groq API]]
         Qdrant[[Qdrant Cloud]]
     end
 
-    subgraph "Google Cloud Project"
-        CR[Cloud Run Service]
-        
-        subgraph "Private VPC (The Office)"
-            VPC_Conn[VPC Connector / Tunnel]
-            DB[(Private Cloud SQL)]
-            Cache[(Private Redis)]
+    subgraph Google Cloud Project
+        subgraph Private VPC
+            CR[Cloud Run Container\nwith private VPC IP]
+            Redis[(Redis Memorystore\n10.x.x.x)]
+            SQL[(Cloud SQL\nunix socket)]
         end
     end
 
     User -->|HTTPS| CR
     CR --> Groq
     CR --> Qdrant
-    
-    %% The Private Tunnel
-    CR ==>|Private Tunnel| VPC_Conn
-    VPC_Conn --> DB
-    VPC_Conn --> Cache
+    CR -->|private IP — no connector| Redis
+    CR -->|Cloud SQL Auth Proxy\nunix socket| SQL
+```
+
+### How It's Configured in Terraform
+
+```hcl
+# terraform/cloud_run.tf
+template {
+  vpc_access {
+    network_interfaces {
+      network    = google_compute_network.vpc.name
+      subnetwork = google_compute_subnetwork.subnet.name
+    }
+    egress = "ALL_TRAFFIC"
+  }
+}
+```
+
+`egress = "ALL_TRAFFIC"` means all outbound traffic (including calls to Groq and Qdrant Cloud) flows through the VPC. This keeps routing simple and consistent — no split-brain between VPC and internet traffic.
+
+---
+
+## Why Not a VPC Connector?
+
+The Serverless VPC Access Connector (`google_vpc_access_connector`) is the older approach and still works — but:
+
+- It requires a dedicated resource with its own subnet CIDR range and minimum instance count
+- It adds latency (traffic proxied through the connector, not routed directly)
+- It costs money even when idle
+- It is provisioned separately and must be sized correctly upfront
+
+Direct VPC egress is available on Cloud Run gen2 (which is the default since 2023) and requires no extra resource — just the `network_interfaces` block.
+
+---
+
+## Cloud SQL: Unix Socket, Not TCP
+
+Redis is reached by private IP. Cloud SQL is reached differently — via a Unix socket at `/cloudsql/{connection_name}`. The Cloud SQL Auth Proxy runs as a sidecar inside the Cloud Run container. This means:
+
+- No TCP port open for Cloud SQL — the public IP exists but no `authorized_networks` are whitelisted
+- Authentication uses IAM, not password-only
+- The connection string uses the socket path as the host:
+
+```
+host=/cloudsql/project:region:instance  dbname=...  user=...  password=...
 ```
 
 ---
 
-## 🛡️ Why do we use this?
+## Security Properties
 
-1.  **Zero-Trust Security**: Your database doesn't need a public IP address. It is invisible to the entire world except for your Cloud Run service.
-2.  **Data Residency**: Your data stays within Google's internal private fiber network. It never touches the public internet "cables."
-3.  **Performance**: Internal VPC communication is often faster and has lower latency than going through public gateways.
-
----
-
-## 💡 Pro-Tip for Students
-Even if your app doesn't use a database *today*, building the VPC and the Connector now is a "Future-Proofing" step. It means you can scale from a simple memory-based app to a massive persistent database app just by changing a single line of code!
----
-
-## 🏗️ Creating the Tunnel: Command Breakdown
-
-To build the tunnel, we run this command:
-
-```powershell
-gcloud compute networks vpc-access connectors create rag-vps \
-    --region us-central1 \
-    --network default \
-    --range 10.8.0.0/28
-```
-
-### Why this command?
-*   **`rag-vps`**: This is the name of your tunnel. Note: GCP only allows hyphens (`-`), not underscores (`_`).
-*   **`--network default`**: This tells the tunnel which "Private Office" (VPC) it should lead to.
-*   **`--range 10.8.0.0/28`**: This is the **most important part**. It is the "Internal ID" or "Phone Number" of the tunnel.
+| What | How |
+|---|---|
+| Redis is not reachable from the internet | Memorystore only has a private IP; no public endpoint |
+| Cloud SQL is not reachable via TCP | `ipv4_enabled = true` but no `authorized_networks` — proxy-only access |
+| Cloud Run to Redis | Direct VPC egress — traffic stays on Google's private fiber |
+| Cloud Run to Groq/Qdrant | Outbound HTTPS over public internet, encrypted in transit |
 
 ---
 
-## ⚠️ The "IP Range Conflict" Rule
+## See Also
 
-When creating a VPC Connector, you must provide a **CIDR range** (like `10.8.0.0/28`). Think of this as the **private lane** on a highway reserved strictly for this tunnel.
-
-### Why do we have to change the range for a new connector?
-If you try to create a second connector (e.g., `rag-vps-2`) using the **same** range (`10.8.0.0/28`), Google Cloud will throw an error: `Invalid IP CIDR range... it conflicts with an existing subnetwork.`
-
-**In simple terms:** You cannot have two different tunnels trying to use the same "private lane" at the same time.
-
-### How to fix it:
-If you need to create a new connector because the first one is stuck or you want a different name, you **must increment the number**:
-*   Connector 1: `10.8.0.0/28`
-*   Connector 2: `10.9.0.0/28`
-*   Connector 3: `10.10.0.0/28`
-
-This ensures every tunnel has its own unique path into your private network!
+- `terraform/cloud_run.tf` — `vpc_access.network_interfaces` block
+- `terraform/main.tf` — VPC and subnet definitions
+- `DOCS/24_INFRASTRUCTURE_AS_CODE_TERRAFORM.md` — full Terraform overview
+- `DOCS/20_STEP_2_POSTGRES_MEMORY.md` — Cloud SQL unix socket connection details

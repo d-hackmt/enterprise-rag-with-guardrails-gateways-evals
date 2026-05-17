@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 load_dotenv()
 logfire.configure(token=os.getenv("LOGFIRE_TOKEN"))
 
-# Now safe to import app modules - logfire is already active
+# Now safe to import app modules
 from fastapi import FastAPI, Response
 from app.agents.graph import rag_agent
 from app.guardrails import initialize_rails, guard
@@ -18,7 +18,6 @@ from pydantic import BaseModel
 from typing import Optional
 
 
-# Initialize FastAPI
 app = FastAPI(title="Enterprise Agentic RAG API")
 
 
@@ -26,11 +25,12 @@ app = FastAPI(title="Enterprise Agentic RAG API")
 def startup_event():
     initialize_rails()
 
+
 class QueryRequest(BaseModel):
     q: str
     thread_id: Optional[str] = "default_user"
-    
-    
+
+
 @app.get("/")
 def home():
     return {"message": "Enterprise LangGraph RAG API is live."}
@@ -38,21 +38,15 @@ def home():
 
 @app.get("/graph")
 def get_graph_image():
-    """
-    Returns the Mermaid image of the agent's workflow.
-    """
     try:
         png_bytes = rag_agent.get_graph().draw_mermaid_png()
         return Response(content=png_bytes, media_type="image/png")
     except Exception as e:
         return {"error": f"Could not generate graph image: {e}"}
-    
-    
+
+
 @app.post("/query")
 def query(request: QueryRequest):
-    """
-    Executes the LangGraph RAG flow with memory using a POST request.
-    """
     q = request.q
     thread_id = request.thread_id
 
@@ -61,14 +55,12 @@ def query(request: QueryRequest):
         "current_query": q,
         "documents": [],
         "plan": ["Start"],
-        "status": "Initializing Graph..."
+        "status": "Initializing Graph...",
     }
-    
-    # Configuration for Memory (Thread ID)
     config = {"configurable": {"thread_id": thread_id}}
-    
+
     try:
-        # Gate 1: NeMo Guardrails — blocks off-topic, jailbreaks, and handles dialog
+        # Gate 1: NeMo Guardrails — blocks off-topic / jailbreaks
         rail_fired, rail_response = guard(q)
         if rail_fired:
             logfire.info(f"🛡️ Request blocked by guardrails | thread={thread_id}")
@@ -77,26 +69,53 @@ def query(request: QueryRequest):
                 "answer": rail_response,
                 "thought_process": ["Intent: Guardrails Fired", "Retrieval: Skipped"],
                 "status": "Blocked by guardrails.",
-                "sources": []
+                "sources": [],
             }
 
-        # Gate 2: LangGraph RAG pipeline
-        # Run the graph synchronously to preserve Logfire context variables
+        # Gate 2: Semantic Cache — serve instantly if a similar query was answered before
+        if os.getenv("USE_SEMANTIC_CACHE", "false").lower() == "true":
+            try:
+                from app.services.gcp.redis_semantic_cache import check_cache
+                cached = check_cache(q)
+                if cached:
+                    logfire.info(f"⚡ Semantic cache HIT | thread={thread_id}")
+                    return {
+                        "question": q,
+                        "answer": cached,
+                        "thought_process": ["⚡ Semantic Cache HIT — instant response"],
+                        "status": "Served from cache.",
+                        "sources": [],
+                    }
+            except Exception as e:
+                logfire.warning(f"⚠️ Cache check failed (non-fatal): {e}")
+
+        # Gate 3: LangGraph RAG pipeline
         final_output = rag_agent.invoke(initial_state, config=config)
-        
+
+        answer = final_output.get("final_answer", "")
+
+        # Store successful answer in semantic cache for future hits
+        if os.getenv("USE_SEMANTIC_CACHE", "false").lower() == "true" and answer:
+            try:
+                from app.services.gcp.redis_semantic_cache import set_cache
+                set_cache(q, answer)
+            except Exception:
+                pass
+
         return {
             "question": q,
-            "answer": final_output.get("final_answer"),
+            "answer": answer,
             "thought_process": final_output.get("plan"),
             "status": final_output.get("status"),
-            "sources": final_output.get("documents", [])
+            "sources": final_output.get("documents", []),
         }
+
     except Exception as e:
         logfire.error(f"❌ Backend Execution Failed: {e}")
         return {
             "question": q,
-            "answer": "I apologize, but I encountered an internal error while processing your request. Please try again later.",
+            "answer": "I apologize, but I encountered an internal error. Please try again.",
             "thought_process": ["Error encountered during execution."],
             "status": "error",
-            "sources": []
+            "sources": [],
         }

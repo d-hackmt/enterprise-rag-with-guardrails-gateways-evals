@@ -1,0 +1,31 @@
+# ==============================================================================
+# EVALS MICROSERVICE — RAGAS eval suite
+# Uses Vertex AI embeddings (same as production) instead of sentence-transformers.
+# No deepeval, no sentence-transformers, no PyTorch — lightweight image.
+# ==============================================================================
+
+# --- UI ---
+streamlit
+python-dotenv==1.2.2
+requests==2.33.1
+nest-asyncio
+pandas
+
+# --- LANGCHAIN (required by RAGAS internals) ---
+langchain==1.2.18
+langchain-groq==1.1.2
+langchain-community==0.4.1
+langchain-openai==1.2.1
+pydantic==2.13.4
+
+# --- GOOGLE CLOUD (Vertex AI embeddings for RAGAS — replaces sentence-transformers) ---
+google-cloud-aiplatform
+langchain-google-vertexai
+
+# --- EVALS ---
+ragas
+
+# --- OBSERVABILITY ---
+langsmith==0.8.3
+logfire[requests]==4.32.1
+loguru==0.7.3

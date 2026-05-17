@@ -65,3 +65,8 @@ deepeval                    # Pytest-compatible test runner wrapping RAGAS & saf
 langfuse                    # Live production monitoring, tracing & user feedback collection
 
 sentence-transformers       # Embeddings
+
+# --- POSTGRES CHECKPOINTER (LangGraph persistent memory) ---
+psycopg[binary]             # psycopg3 driver — required by PostgresSaver
+psycopg-pool                # Connection pool for psycopg3
+langgraph-checkpoint-postgres  # LangGraph PostgresSaver package
