@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>A Hands-On Guide to Kubernetes Horizontal & Vertical Pod Autoscalers</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            line-height: 1.6;
+            color: #242424;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #ffffff;
+        }
+        h1 {
+            font-size: 42px;
+            font-weight: 700;
+            margin-bottom: 10px;
+            line-height: 1.2;
+        }
+        h2 {
+            font-size: 32px;
+            font-weight: 600;
+            margin-top: 40px;
+            margin-bottom: 20px;
+            border-bottom: 1px solid #eaeaea;
+            padding-bottom: 10px;
+        }
+        h3 {
+            font-size: 24px;
+            font-weight: 600;
+            margin-top: 30px;
+            margin-bottom: 15px;
+        }
+        p {
+            font-size: 18px;
+            margin-bottom: 20px;
+            font-family: Georgia, Cambria, "Times New Roman", Times, serif;
+        }
+        ul, ol {
+            font-size: 18px;
+            margin-bottom: 20px;
+            font-family: Georgia, Cambria, "Times New Roman", Times, serif;
+            padding-left: 30px;
+        }
+        li {
+            margin-bottom: 10px;
+        }
+        pre {
+            background-color: #f9f9f9;
+            padding: 20px;
+            border-radius: 5px;
+            overflow-x: auto;
+            font-family: "Courier New", Courier, monospace;
+            font-size: 14px;
+            border: 1px solid #e0e0e0;
+            margin-bottom: 25px;
+        }
+        code {
+            background-color: #f2f2f2;
+            padding: 2px 4px;
+            border-radius: 3px;
+            font-family: "Courier New", Courier, monospace;
+            font-size: 0.9em;
+        }
+        img {
+            max-width: 100%;
+            height: auto;
+            display: block;
+            margin: 30px auto;
+            border-radius: 4px;
+        }
+        .caption {
+            text-align: center;
+            font-size: 14px;
+            color: #6b6b6b;
+            margin-top: -20px;
+            margin-bottom: 30px;
+            font-family: sans-serif;
+        }
+        .author-info {
+            display: flex;
+            align-items: center;
+            margin-bottom: 30px;
+            font-family: sans-serif;
+            color: #6b6b6b;
+        }
+        .author-info img {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            margin: 0 15px 0 0;
+        }
+        .divider {
+            text-align: center;
+            font-size: 30px;
+            color: #242424;
+            margin: 40px 0;
+            letter-spacing: 15px;
+        }
+        a {
+            color: #1a8917;
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>⎈ A Hands-On Guide to Kubernetes Horizontal & Vertical Pod Autoscalers 🛠️</h1>
+    <h3 style="font-weight: 400; color: #6b6b6b;">⇢ HPA & VPA in Kubernetes with a Practical Example</h3>
+
+    <div class="author-info">
+        <img src="https://miro.medium.com/v2/resize:fill:64:64/1*M86ezvyPhmdyuLzrGLP6vg.jpeg" alt="Anvesh Muppeda">
+        <div>
+            <strong>Anvesh Muppeda</strong><br>
+            <span>Jun 3, 2024 · 11 min read</span>
+        </div>
+    </div>
+
+    <img src="https://miro.medium.com/v2/resize:fit:875/1*siyKgCfqACYFz-J4fyWyJg.png" alt="HPA & VPA in Kubernetes">
+    <p class="caption">HPA & VPA in Kubernetes by Anvesh Muppeda</p>
+
+    <p>In the world of container orchestration, Kubernetes has emerged as the de facto standard. One of its powerful features is autoscaling, which helps maintain application performance and optimize resource usage. In this post, we’ll dive into two main types of autoscaling in Kubernetes: <code>Horizontal Pod Autoscaling (HPA)</code> and <code>Vertical Pod Autoscaling (VPA)</code>.</p>
+
+    <h2>Introduction to Kubernetes Autoscaling</h2>
+    <p>Autoscaling in Kubernetes ensures that your application can handle varying loads by automatically adjusting the number of running pods or the resources allocated to them. This dynamic adjustment is crucial for maintaining application performance, optimizing resource usage, and reducing operational costs.</p>
+
+    <img src="https://miro.medium.com/v2/resize:fit:875/1*0wJBUCAWTLAe62PHmhoLOQ.gif" alt="Autoscaling Animation">
+    <p class="caption">HPA & VPA Animation</p>
+
+    <div class="divider">...</div>
+
+    <h2>Metric Server Setup</h2>
+    <p>Before testing <code>Horizontal Pod Autoscaler (HPA)</code> and <code>Vertical Pod Autoscaler (VPA)</code>, it’s essential to have the Metrics Server installed in your Kubernetes cluster. The Metrics Server collects resource usage metrics from the cluster’s nodes and pods, which are necessary for autoscaling decisions.</p>
+    
+    <p>You can install the Metrics Server using either a YAML manifest or the official Helm chart. To install the latest release of the Metrics Server from the YAML manifest, follow these steps:</p>
+
+    <ol>
+        <li><strong>Download the Components Manifest:</strong> Use <code>kubectl apply</code> to download and apply the Components manifest directly from the latest release of the Metrics Server:</li>
+    </ol>
+
+    <pre>$ kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml</pre>
+
+    <p>This command fetches the YAML manifest for the latest release of the Metrics Server from its GitHub repository and applies it to your Kubernetes cluster.</p>
+
+    <p>2. <strong>Verify Installation:</strong> After applying the manifest, verify that the Metrics Server pods are running successfully. You can check the pods in the <code>kube-system</code> namespace:</p>
+
+    <pre>kubectl get pods -n kube-system | grep metrics-server</pre>
+
+    <p>You should see pods related to the Metrics Server running and ready.</p>
+
+    <p>3. <strong>Confirm Metrics Collection:</strong> Once the Metrics Server is up and running, you can confirm that it’s collecting metrics by querying the API. For example, you can retrieve the CPU and memory usage metrics for nodes and pods:</p>
+
+    <pre>$ kubectl top nodes
+$ kubectl top pods --all-namespaces</pre>
+
+    <p>If the Metrics Server is properly installed and functioning, you should see CPU and memory usage metrics for nodes and pods in your cluster.</p>
+
+    <p>With the Metrics Server installed and collecting metrics, you can proceed to test the Horizontal Pod Autoscaler (<code>HPA</code>) and Vertical Pod Autoscaler (<code>VPA</code>) functionalities in your Kubernetes cluster.</p>
+
+    <div class="divider">...</div>
+
+    <h2>Horizontal Pod Autoscaling (HPA)</h2>
+    <h3>What is HPA?</h3>
+    <p><code>Horizontal Pod Autoscaling (HPA)</code> automatically scales the number of pods in a replication controller, deployment, or replica set based on observed CPU utilization (or other select metrics). This allows your application to scale out (add more pods) or scale in (reduce the number of pods) in response to load changes.</p>
+
+    <h3>How Does HPA Work?</h3>
+    <p>HPA operates by:</p>
+    <ol>
+        <li><strong>Monitoring Metrics:</strong> HPA continuously monitors the specified metrics (e.g., CPU usage, memory usage, custom metrics).</li>
+        <li><strong>Evaluating Thresholds:</strong> It compares the current metric values against predefined thresholds.</li>
+        <li><strong>Scaling Pods:</strong> If the metric values exceed the thresholds, HPA increases the number of pods. Conversely, if the values drop below the thresholds, it decreases the number of pods.</li>
+    </ol>
+
+    <h3>Advantages of HPA</h3>
+    <ul>
+        <li><strong>Elasticity</strong>: Automatically adjusts the number of pods to meet current demand.</li>
+        <li><strong>Cost-Efficiency:</strong> Optimizes resource usage by adding or removing pods as needed.</li>
+        <li><strong>Performance</strong>: Helps maintain application performance during high traffic periods.</li>
+    </ul>
+
+    <h2>HPA Practical Example</h2>
+    <p>To set up HPA, you need to define an <code>HPA</code> object in your Kubernetes cluster.</p>
+    <p>Let’s deploy an example using <code>HPA</code>.</p>
+
+    <h3>Step 1: Create a Deployment</h3>
+    <p>Create a file named <code>hpa-deployment.yaml</code> with the following content:</p>
+
+<pre>apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hpa-deploy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+      - name: nginx
+        image: nginx
+        resources:
+          requests:
+            cpu: "25m"
+          limits:
+            cpu: "200m"</pre>
+
+    <p>Apply the deployment:</p>
+    <pre>kubectl apply -f hpa-deployment.yaml</pre>
+
+    <h3>Step 2: Create a Service</h3>
+    <p>Create a file named <code>nginx-service.yaml</code> with the following content:</p>
+
+<pre>apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-svc
+  labels:
+    app: nginx
+spec:
+  ports:
+  - port: 80
+  selector:
+    app: nginx</pre>
+
+    <p>Apply the service:</p>
+    <pre>kubectl apply -f nginx-service.yaml</pre>
+
+    <h3>Step 3: Create an HPA</h3>
+    <p>Create a file named <code>hpa.yaml</code> with the following content:</p>
+
+<pre>apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: nginx-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: hpa-deploy
+  minReplicas: 1
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 50</pre>
+
+    <p>Apply the HPA:</p>
+    <pre>kubectl apply -f hpa.yaml</pre>
+
+    <p>With this setup, the HPA will automatically scale the number of <code>nginx</code> pods between 1 and 10 based on the CPU utilization, aiming to keep it around 50%.</p>
+
+    <h3>Step 4: Testing</h3>
+    <p>Now, let’s test the HPA by increasing the load on the <code>hpa-deploy</code> deployment. We'll use the following command to create a new pod that generates load on the target deployment and observe if the number of pods increases accordingly.</p>
+
+    <p>Pod status before generate load:</p>
+    <pre>$ kubectl top po
+NAME                          CPU(cores)   MEMORY(bytes)   
+hpa-deploy-695d6d995c-lb7f2   0m           2Mi</pre>
+
+    <p>Run this command to generate load:</p>
+    <pre>$ kubectl run -i --tty load-generator --rm --image=busybox:1.28 --restart=Never -- /bin/sh -c "while sleep 0.01; do wget -q -O- http://nginx-svc; done"</pre>
+
+    <p>This command will continuously generate requests to the <code>nginx-svc</code> service, thereby increasing the CPU utilization of the <code>nginx</code> pods.</p>
+    <p>To observe the CPU utilization and the status of the HPA, use the following commands:</p>
+
+    <p>Check the CPU utilization of the pods:</p>
+    <pre>$ kubectl top po
+NAME                          CPU(cores)   MEMORY(bytes)   
+hpa-deploy-695d6d995c-5smnw   13m          3Mi             
+hpa-deploy-695d6d995c-lb7f2   17m          2Mi             
+load-generator                133m         0Mi</pre>
+
+    <p>Monitor the HPA status:</p>
+    <pre>$ kubectl get hpa -w
+NAME        REFERENCE               TARGETS   MINPODS   MAXPODS   REPLICAS   AGE
+nginx-hpa   Deployment/hpa-deploy   0%/50%    1         10        1          101s
+nginx-hpa   Deployment/hpa-deploy   80%/50%   1         10        1          105s
+nginx-hpa   Deployment/hpa-deploy   68%/50%   1         10        2          2m
+nginx-hpa   Deployment/hpa-deploy   54%/50%   1         10        2          2m15s
+nginx-hpa   Deployment/hpa-deploy   42%/50%   1         10        2          2m30s</pre>
+
+    <p>These commands will help you monitor the CPU usage and see if the HPA adjusts the number of pods in response to the increased load.</p>
+    <p>By following these steps, you can validate the functionality of the HPA and ensure it dynamically scales your application based on CPU utilization.</p>
+
+    <div class="divider">...</div>
+
+    <h2>Vertical Pod Autoscaling (VPA)</h2>
+    <h3>What is VPA?</h3>
+    <p><code>Vertical Pod Autoscaling (VPA)</code> adjusts the CPU and memory resource requests and limits for your pods. Instead of adding more pods, VPA modifies the resources allocated to existing pods.</p>
+
+    <h3>How Does VPA Work?</h3>
+    <p>VPA operates by:</p>
+    <ol>
+        <li><strong>Monitoring Resource Usage:</strong> VPA continuously monitors the CPU and memory usage of the pods.</li>
+        <li><strong>Recommending Resources:</strong> Based on the usage patterns, VPA recommends resource adjustments.</li>
+        <li><strong>Applying Changes:</strong> The VPA can automatically apply the recommended changes to the pod specifications, typically requiring a pod restart.</li>
+    </ol>
+
+    <h3>Advantages of VPA</h3>
+    <ul>
+        <li><strong>Resource Optimization:</strong> Ensures pods have the right amount of resources, preventing over-provisioning or under-provisioning.</li>
+        <li><strong>Simplified Resource Management:</strong> Reduces the need to manually adjust resource requests and limits.</li>
+        <li><strong>Improved Performance:</strong> Helps maintain application performance by dynamically adjusting resources based on actual usage.</li>
+    </ul>
+
+    <h2>How VPA Adjusts Resources</h2>
+    <ol>
+        <li><strong>Initial Adjustment: </strong>When the VPA first starts managing a pod, it ensures that the pod’s resource requests are within the specified <code>minAllowed</code> and <code>maxAllowed</code> ranges. In your case, the <code>minAllowed</code> CPU is set to <code>100m</code>, so the VPA initially adjusts the pod's CPU request to at least <code>100m</code> to ensure it has a minimum baseline of resources.</li>
+        <li><strong>Ongoing Monitoring and Adjustment:</strong> After the initial adjustment, the VPA continues to monitor the CPU and memory usage of the pods. It collects data over time to understand the resource utilization patterns and make more informed recommendations.</li>
+        <li><strong>Recommendation Based on Observed Usage:</strong> The VPA makes recommendations based on observed usage. It doesn’t immediately jump to the maximum allowed (<code>maxAllowed</code>) value unless the observed usage justifies it. Instead, it incrementally adjusts the resource requests to align closely with actual usage patterns.</li>
+    </ol>
+
+    <h2>Practical Example of VPA</h2>
+    <p>Let’s deploy an example using VPA.</p>
+
+    <h3>Step 1: Install VPA</h3>
+    <p>Before creating VPA objects first we need to install VPA in our cluster using the below steps:</p>
+    <p>Clone the VPA Source Code: Use Git to clone the VPA source code repository to your local machine. Run the following command:</p>
+    <pre>git clone https://github.com/kubernetes/autoscaler.git</pre>
+
+    <p>Navigate to the VPA Directory: Change your current directory to the <code>autoscaler</code> directory, which contains the VPA source code:</p>
+    <pre>cd autoscaler</pre>
+
+    <p>Run the Installation Script: Inside the <code>autoscaler</code> directory, run the installation script <code>vpa-up.sh</code>. This script sets up the necessary components for VPA in your Kubernetes cluster:</p>
+    <pre>./hack/vpa-up.sh</pre>
+
+    <p>This script will install the Vertical Pod Autoscaler components, including custom resources, controllers, and other required resources, into your Kubernetes cluster.</p>
+    <p>Verify Installation: Once the installation script has completed successfully, verify that the VPA components are installed and running in your cluster:</p>
+    <pre>kubectl get pods -n kube-system | grep vpa</pre>
+    <p>You should see pods related to Vertical Pod Autoscaler running in the <code>kube-system</code> namespace.</p>
+
+    <h3>Step 2: Create a Deployment</h3>
+    <p>Create a file named <code>vpa-deployment.yaml</code> with the following content:</p>
+
+<pre>apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: high-cpu-utilization-deployment
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: cpu-utilization-app
+  template:
+    metadata:
+      labels:
+        app: cpu-utilization-app
+    spec:
+      containers:
+      - name: cpu-utilization-container
+        image: ubuntu
+        command: ["/bin/sh", "-c", "apt-get update && apt-get install -y stress-ng && while true; do stress-ng --cpu 1; done"]
+        resources:
+          limits:
+            cpu: "0.05"
+          requests:
+            cpu: "0.05"</pre>
+
+    <p>This deployment repeatedly runs a CPU stress test using the `<code>stress-ng</code>` tool, consuming a small but continuous amount of CPU (limited to 0.05 cores) to simulate high CPU utilization.</p>
+    <p>Apply the deployment:</p>
+    <pre>$ kubectl apply -f vpa-deployment.yaml</pre>
+
+    <h3>Step 3: Create a VPA</h3>
+    <p>Create a file named <code>vpa.yaml</code> with the following content:</p>
+
+<pre>apiVersion: "autoscaling.k8s.io/v1"
+kind: VerticalPodAutoscaler
+metadata:
+  name: stress-vpa
+spec:
+  targetRef:
+    apiVersion: "apps/v1"
+    kind: Deployment
+    name: high-cpu-utilization-deployment
+  updatePolicy:
+    updateMode: Auto
+  resourcePolicy:
+    containerPolicies:
+      - containerName: '*'
+        minAllowed:
+          cpu: 100m
+          memory: 50Mi
+        maxAllowed:
+          cpu: 200m  #maximum vpa will be allocating this many cpus even if demand is higher.
+          memory: 500Mi
+        controlledResources: ["cpu", "memory"]</pre>
+
+    <p>There are multiple valid options for updateMode in VPA. They are:</p>
+    <ul>
+        <li><strong>Off </strong>— VPA will only provide the recommendations, and it will not automatically change resource requirements.</li>
+        <li><strong>Initial </strong>— VPA only assigns resource requests on pod creation and never changes them later.</li>
+        <li><strong>Recreate </strong>— VPA assigns resource requests on pod creation time and updates them on existing pods by evicting and recreating them.</li>
+        <li><strong>Auto mode </strong>— It recreates the pod based on the recommendation.</li>
+    </ul>
+
+    <p>We increased the CPU metrics in the above demo and then manually applied the changes to scale the pod. We can do this automatically by using the <strong>updateMode: “Auto”</strong> parameter.</p>
+    <p>This Vertical Pod Autoscaler (VPA) automatically adjusts the CPU and memory requests and limits for the `high-cpu-utilization-deployment` to ensure efficient resource usage, within specified bounds (100m to 200m CPU and 50Mi to 500Mi memory). It targets all containers in the deployment for resource management.</p>
+
+    <p>Apply the VPA:</p>
+    <pre>$ kubectl apply -f vpa.yaml</pre>
+
+    <h3>Step 4: Testing</h3>
+    <p>First, let’s check the initial CPU utilization of the target pods:</p>
+    <pre>$ kubect top po
+NAME                                               CPU(cores)   MEMORY(bytes)   
+high-cpu-utilization-deployment-78cc948dfb-fqbq9   50m          13Mi            
+high-cpu-utilization-deployment-78cc948dfb-qtbt8   50m          9Mi</pre>
+
+    <p>Verify the CPU requests for the pods:</p>
+    <pre>$ kubectl get po -o jsonpath='{.items[*].spec.containers[*].resources.requests.cpu}'
+50m 50m</pre>
+
+    <p>As seen, the two target pods are consuming their maximum CPU request since we are generating CPU load on them.</p>
+    <p>Next, check the VPA status:</p>
+    <pre>$ kubectl get vpa     
+NAME         MODE   CPU    MEM       PROVIDED   AGE
+stress-vpa   Auto   100m   262144k   True       2m5s</pre>
+
+    <p>Wait for some time and then check the pod status again:</p>
+    <pre>$ kubectl get po                                                                    
+NAME                                               READY   STATUS    RESTARTS   AGE
+high-cpu-utilization-deployment-78cc948dfb-wvfkm   1/1     Running   0          66s
+high-cpu-utilization-deployment-78cc948dfb-z7f87   1/1     Running   0          2m6s</pre>
+
+    <p>Check the updated CPU requests:</p>
+    <pre>$ kubectl get po -o jsonpath='{.items[*].spec.containers[*].resources.requests.cpu}'
+100m 100m%</pre>
+
+    <p>Monitor the updated CPU utilization:</p>
+    <pre>$ kubectl top po                                                                    
+NAME                                               CPU(cores)   MEMORY(bytes)   
+high-cpu-utilization-deployment-78cc948dfb-wvfkm   101m         47Mi            
+high-cpu-utilization-deployment-78cc948dfb-z7f87   100m         49Mi</pre>
+
+    <p>As observed, the pods were restarted and their CPU request values increased from <code>50m</code> to <code>100m</code> due to the VPA’s <code>minAllowed</code> setting. The pods will continue generating load until they reach their limits.</p>
+    <p>The VPA will then increase the CPU request values to the recommended value of i.e., max of 200m as needed.</p>
+
+    <pre>$ kubectl get po -o jsonpath='{.items[*].spec.containers[*].resources.requests.cpu}'
+126m 126m
+
+$ kubectl top po                                                                    
+NAME                                               CPU(cores)   MEMORY(bytes)   
+high-cpu-utilization-deployment-78cc948dfb-7pqln   127m         48Mi            
+high-cpu-utilization-deployment-78cc948dfb-8tn82   127m         47Mi</pre>
+
+    <h3>Why the CPU Request Increased to 126m Instead of 200m</h3>
+    <ul>
+        <li><strong>Observed Usage:</strong> The VPA’s recommendation of <code>126m</code> for the CPU is based on the actual usage observed from the container. The VPA aims to provide just enough resources to meet the demand without over-provisioning. The <code>126m</code> recommendation suggests that the current usage pattern of the container indicates that <code>126m</code> is sufficient for its needs at this time.</li>
+        <li><strong>Incremental Adjustments:</strong> The VPA makes incremental adjustments to avoid sudden large changes that might disrupt the application. It gradually increases the resource requests based on the monitored usage, ensuring stability and efficiency.</li>
+        <li><strong>Efficiency and Limits:</strong> While the <code>maxAllowed</code> is set to <code>200m</code>, this value is a ceiling rather than a target. The VPA only increases the CPU request to <code>200m</code> if the observed usage indicates that such an increase is necessary. In above case, the observed usage suggested that <code>126m</code> is adequate, so the VPA set the request to this value.</li>
+    </ul>
+
+    <p>After some time:</p>
+    <pre>$ kubectl get po -o jsonpath='{.items[*].spec.containers[*].resources.requests.cpu}'
+163m 163m</pre>
+
+    <p>With this setup, the VPA will automatically adjust the CPU and memory requests for the <code>high-cpu-utilization-deployment</code> deployment, aiming to keep the resource usage within the specified limits.</p>
+
+    <h3>Exclude scaling for a specific container</h3>
+    <p>To exclude scaling for a specific container within a pod managed by the VerticalPodAutoscaler (VPA), you can set the mode for that container to “Off”. This ensures that the VPA does not adjust the resource requests for that particular container. Here’s an example configuration:</p>
+
+<pre>apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+  .
+  .
+  .
+  resourcePolicy:
+    containerPolicies:
+    - containerName: &lt;container_name&gt;
+      mode: "Off"</pre>
+
+    <p>In this example:</p>
+    <ul>
+        <li><code>&lt;container_name&gt;</code> refers to the name of the container within the pod for which you want to exclude scaling.</li>
+        <li><code>mode: "Off"</code> specifies that the VPA should not apply any autoscaling actions to this particular container.</li>
+    </ul>
+    <p>By configuring the VPA in this way, you can ensure that only specific containers within your pods are subject to autoscaling, while others remain unaffected. This flexibility allows you to fine-tune the scaling behavior according to the requirements of your workload.</p>
+
+    <div class="divider">...</div>
+
+    <h2>HPA vs. VPA: Which One to Use?</h2>
+    <p>Choosing between HPA and VPA depends on your application’s requirements:</p>
+    <ul>
+        <li><strong>HPA</strong> is ideal for stateless applications that can easily scale horizontally by adding more pods. It’s useful when you need to handle variable workloads and ensure high availability.</li>
+        <li><strong>VPA</strong> is suitable for applications where scaling horizontally is not feasible or when you need to optimize resource usage for individual pods. It’s beneficial for stateful applications or those with varying resource needs.</li>
+    </ul>
+
+    <div class="divider">...</div>
+
+    <h2>Conclusion</h2>
+    <p>Kubernetes autoscaling, through HPA and VPA, provides robust mechanisms to manage application scalability and resource optimization. By understanding and implementing these autoscaling strategies, you can ensure that your applications are resilient, performant, and cost-effective.</p>
+
+    <div class="divider">...</div>
+
+    <h2>Source Code</h2>
+    <p>You’re invited to explore our <a href="https://github.com/anveshmuppeda/kubernetes" target="_blank">GitHub repository</a>, which houses a comprehensive collection of source code for Kubernetes.</p>
+    <p>Also, if we welcome your feedback and suggestions! If you encounter any issues or have ideas for improvements, please open an issue on our <a href="https://github.com/anveshmuppeda/kubernetes/issues" target="_blank">GitHub repository</a>. 🚀</p>
+
+    <div class="divider">...</div>
+
+    <h2>Connect With Me</h2>
+    <p>If you found this blog insightful and are eager to delve deeper into topics like AWS, cloud strategies, Kubernetes, or anything related, I’m excited to connect with you on <a href="https://www.linkedin.com/in/anveshmuppeda/" target="_blank">LinkedIn</a>. Let’s spark meaningful conversations, share insights, and explore the vast realm of cloud computing together.</p>
+    <p>Feel free to reach out, share your thoughts, or ask any questions. I look forward to connecting and growing together in this dynamic field!</p>
+    <p>Happy deploying! 🚀</p>
+    <p>Happy Kubernetings! ⎈</p>
+
+</body>
+</html>

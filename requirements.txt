@@ -1,0 +1,67 @@
+# ==============================================================================
+# 🤖 ENTERPRISE AGENTIC RAG - REQUIREMENTS
+# ==============================================================================
+
+# --- CORE API & WEB FRAMEWORK ---
+fastapi                     # High-performance web framework for the API
+uvicorn[standard]           # ASGI server to run the FastAPI app
+python-dotenv               # For loading configuration from .env files
+requests                    # HTTP library for internal/external API calls
+streamlit                   # Frontend dashboard for the chat interface
+numpy                       # Numerical processing
+pytz                        # Timezone handling for logs
+nest-asyncio                # Support for nested async loops in notebooks/streamlit
+
+# --- GOOGLE CLOUD PLATFORM (GCP) ---
+google-cloud-storage        # GCS for Raw and Processed file storage
+google-cloud-aiplatform     # Vertex AI (Embeddings)
+google-cloud-discoveryengine # Vertex AI Search services
+google-cloud-documentai     # OCR & PDF Parsing via Cloud API (Replaced heavy local parsing)
+cloud-sql-python-connector  # Secure connection to Cloud SQL (Postgres)
+
+# --- VECTOR DB & RETRIEVAL ---
+qdrant-client               # Vector Database for semantic search
+flashrank                   # Ultra-fast local cross-encoder for semantic reranking
+redis                       # Memorystore for semantic caching
+sqlalchemy                  # ORM for persistent conversation history
+pg8000                      # Postgres driver for Cloud SQL
+
+# --- LANGCHAIN & AGENTIC ORCHESTRATION ---
+langchain                   # Core LLM orchestration
+langgraph                   # State-machine logic for cyclic agent flows
+langchain-google-vertexai   # Integration for Google LLMs/Embeddings
+langchain-groq              # Integration for lightning-fast Llama 3.3 models
+langchain-community         # Community-contributed tools and loaders
+langchain-openai            # (Optional) OpenAI compatibility layer
+pydantic>=2.0.0             # Data validation and settings management
+
+# --- DATA INGESTION & OFFICE PARSING ---
+unstructured                # Base library for document partitioning
+python-pptx                 # Parser for PowerPoint files
+python-docx                 # Parser for Word documents
+pypdf                       # PDF manipulation for splitting large files
+beautifulsoup4              # High-speed HTML text extraction
+
+
+
+# --- OBSERVABILITY & DISTRIBUTED TRACING ---
+langsmith                   # Specialized tracing for LangChain/LangGraph
+logfire[fastapi,requests]   # Pydantic Logfire — FastAPI + requests instrumentation
+loguru                      # Enhanced logging for Python
+
+# --- GUARDRAILS ---
+nemoguardrails              # NVIDIA NeMo Guardrails for input/output safety rails
+langchain-nvidia-ai-endpoints #Langchain integration with NVIDIA AI Endpoints
+
+
+# --- LLM GATEWAY ---
+portkey-ai                  # Portkey Gateway for unified LLM routing, fallbacks & observability
+
+# EVALS
+
+# --- EVALUATION (EVALS) ---
+ragas                       # RAG-specific evaluation metrics (Faithfulness, Relevancy, Recall)
+deepeval                    # Pytest-compatible test runner wrapping RAGAS & safety metrics
+langfuse                    # Live production monitoring, tracing & user feedback collection
+
+sentence-transformers       # Embeddings

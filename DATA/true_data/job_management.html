@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+    body { font-family: Calibri, sans-serif; line-height: 1.5; color: #333; }
+    h1 { color: #2E74B5; border-bottom: 2px solid #2E74B5; padding-bottom: 5px; }
+    h2 { color: #1F4E79; margin-top: 20px; border-bottom: 1px solid #ddd; padding-bottom: 5px; }
+    h3 { color: #1F4E79; margin-top: 15px; }
+    table { border-collapse: collapse; width: 100%; margin-bottom: 20px; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; vertical-align: top; }
+    th { background-color: #f2f2f2; }
+    code { font-family: Consolas, "Courier New", monospace; background-color: #f9f9f9; padding: 2px 4px; border-radius: 4px; color: #c7254e; }
+    pre { background-color: #f4f4f4; padding: 10px; border: 1px solid #ddd; overflow-x: auto; font-family: Consolas, "Courier New", monospace; white-space: pre-wrap; word-wrap: break-word; }
+    .note { background-color: #e7f3fe; border-left: 6px solid #2196F3; margin-bottom: 15px; padding: 10px; }
+    a { color: #2E74B5; text-decoration: underline; }
+    img { max-width: 100%; height: auto; border: 1px solid #ddd; margin: 10px 0; }
+</style>
+</head>
+<body>
+
+<h1>Automate job creation and management</h1>
+
+<p>This article shows you how to get started with developer tools to automate the creation and management of jobs. It introduces you to the Databricks CLI, the Databricks SDKs, and the REST API.</p>
+
+<div class="note">
+    <strong>Note:</strong> This article provides examples for creating and managing jobs using the Databricks CLI, the Databricks Python SDK, and the REST API as an easy introduction to those tools. To programmatically manage jobs as part of CI/CD use <a href="https://docs.databricks.com/aws/en/dev-tools/bundles/">Databricks Asset Bundles</a> or the <a href="https://docs.databricks.com/aws/en/dev-tools/terraform/">Databricks Terraform provider</a>.
+</div>
+
+<h2>Compare tools</h2>
+<p>The following table compares the Databricks CLI, the Databricks SDKs, and the REST API for programmatically creating and managing jobs. To learn about all available developer tools, see <a href="https://docs.databricks.com/aws/en/dev-tools/">Local development tools</a>.</p>
+
+<table>
+    <thead>
+        <tr>
+            <th>Tool</th>
+            <th>Description</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><a href="https://docs.databricks.com/aws/en/dev-tools/cli/">Databricks CLI</a></td>
+            <td>Access Databricks functionality using the Databricks command-line interface (CLI), which wraps the REST API. Use the CLI for one-off tasks such as experimentation, shell scripting, and invoking the REST API directly.</td>
+        </tr>
+        <tr>
+            <td><a href="https://docs.databricks.com/aws/en/dev-tools/sdks">Databricks SDKs</a></td>
+            <td>Develop applications and create custom Databricks workflows using a Databricks SDK, available for Python, Java, Go, or R. Instead of sending REST API calls directly using curl or Postman, you can use an SDK to interact with Databricks.</td>
+        </tr>
+        <tr>
+            <td><a href="https://docs.databricks.com/api/workspace/introduction">Databricks REST API</a></td>
+            <td>If none of the above options work for your specific use case, you can use the Databricks REST API directly. Use the REST API directly for use cases such as automating processes where an SDK in your preferred programming language is not currently available.</td>
+        </tr>
+    </tbody>
+</table>
+
+<h2>Get started with the Databricks CLI</h2>
+<p>To install and configure authentication for the Databricks CLI, see <a href="https://docs.databricks.com/aws/en/dev-tools/cli/install">Install or update the Databricks CLI</a> and <a href="https://docs.databricks.com/aws/en/dev-tools/cli/authentication">Authentication for the Databricks CLI</a>.</p>
+
+<p>The Databricks CLI has command groups for Databricks features, including one for jobs, that contain a set of related commands. The <code>jobs</code> command group enables you to manage your jobs and job runs with actions such as <code>create</code>, <code>delete</code>, and <code>get</code>. Because the CLI wraps the Databricks REST API, most CLI commands map to a REST API request. For example, <code>databricks jobs get</code> maps to <code>GET/api/2.2/jobs/get</code>.</p>
+
+<p>To output more detailed usage and syntax information for the jobs command group, use the <code>-h</code> flag:</p>
+<ul>
+    <li><code>databricks jobs -h</code></li>
+    <li><code>databricks jobs &lt;command-name&gt; -h</code></li>
+    <li><code>databricks jobs &lt;command-name&gt; &lt;subcommand-name&gt; -h</code></li>
+</ul>
+
+<h3>Example: Retrieve a job using the CLI</h3>
+<p>To print information about an individual job in a workspace, run the following command:</p>
+
+<pre>
+databricks jobs get &lt;job-id&gt;
+
+# Example
+databricks jobs get 478701692316314
+</pre>
+
+<p>This command returns JSON:</p>
+
+<pre>
+{
+  "created_time": 1730983530082,
+  "creator_user_name": "someone@example.com",
+  "job_id": 478701692316314,
+  "run_as_user_name": "someone@example.com",
+  "settings": {
+    "email_notifications": {
+      "no_alert_for_skipped_runs": false
+    },
+    "format": "MULTI_TASK",
+    "max_concurrent_runs": 1,
+    "name": "job_name",
+    "tasks": [
+      {
+        "email_notifications": {},
+        "notebook_task": {
+          "notebook_path": "/Workspace/Users/someone@example.com/directory",
+          "source": "WORKSPACE"
+        },
+        "run_if": "ALL_SUCCESS",
+        "task_key": "success",
+        "timeout_seconds": 0,
+        "webhook_notifications": {}
+      }
+    ],
+    "timeout_seconds": 0,
+    "webhook_notifications": {}
+  }
+}
+</pre>
+
+<h3>Example: Create a job using the CLI</h3>
+<p>The following example uses the Databricks CLI to create a job. This job contains a single job task that runs the specified notebook.</p>
+
+<ol>
+    <li>Copy and paste the following JSON into a file. You can access the JSON format of any existing job by selecting the <strong>View JSON</strong> option from the job page UI.</li>
+</ol>
+
+<pre>
+{
+  "name": "My hello notebook job",
+  "tasks": [
+    {
+      "task_key": "my_hello_notebook_task",
+      "notebook_task": {
+        "notebook_path": "/Workspace/Users/someone@example.com/hello",
+        "source": "WORKSPACE"
+      }
+    }
+  ]
+}
+</pre>
+
+<ol start="2">
+    <li>Run the following command, replacing <code>&lt;file-path&gt;</code> with the path and name of the file that you just created.</li>
+</ol>
+
+<pre>
+databricks jobs create --json @&lt;file-path&gt;
+</pre>
+
+<h3>Run a job using the CLI</h3>
+<p>There are three ways to run your job when using the command line.</p>
+<ul>
+    <li><strong>Scheduled</strong>. If the job definition (in JSON) includes a schedule, then the job will automatically run on the schedule.</li>
+    <li><strong>Trigger with <code>run-now</code></strong>. The <code>databricks jobs run-now</code> CLI command triggers a run for a job that you have already created.</li>
+    <li><strong>Trigger with <code>submit</code></strong>. The <code>databricks jobs submit</code> CLI command takes a job definition and triggers a run for the job.
+        <ul>
+            <li>With <code>submit</code>, the job is not saved, and isn't visible in the UI. It runs once, and when it is done, it no longer exists as a job.</li>
+        </ul>
+    </li>
+</ul>
+
+<h2>Get started with the Databricks SDK</h2>
+<p>Databricks provides SDKs that allow you to automate operations using popular programming languages such as Python, Java, and Go. This section shows you how to get started using the Python SDK to create and manage jobs on Databricks.</p>
+
+<p>You can use the Databricks SDK from your Databricks notebook or from your local development machine. If you are using your local development machine, ensure you first complete <a href="https://docs.databricks.com/aws/en/dev-tools/sdk-python#get-started">Get started with the Databricks SDK for Python</a>.</p>
+
+<div class="note">
+    <strong>Note:</strong> If you are developing from a Databricks notebook and are using a cluster that uses Databricks Runtime 12.2 LTS and below, you must install the Databricks SDK for Python first. See <a href="https://docs.databricks.com/aws/en/dev-tools/sdk-python#install-sdk-cluster">Install or upgrade the Databricks SDK for Python</a>.
+</div>
+
+<h3>Example: Create a job using the Python SDK</h3>
+<p>The following example notebook code creates a job that runs an existing notebook. It retrieves the existing notebook's path and related job settings with prompts.</p>
+<p>First, make sure that the correct version of the SDK has been installed:</p>
+
+<pre>
+%pip install --upgrade databricks-sdk==0.74.0
+%restart_python
+</pre>
+
+<p>Next, to create a job with a notebook task, run the following, answering the prompts:</p>
+
+<pre>
+from databricks.sdk.service.jobs import JobSettings as Job
+from databricks.sdk import WorkspaceClient
+
+job_name            = input("Provide a short name for the job, for example, my-job: ")
+notebook_path       = input("Provide the workspace path of the notebook to run, for example, /Users/someone@example.com/my-notebook: ")
+task_key            = input("Provide a unique key to apply to the job's tasks, for example, my-key: ")
+
+test_sdk = Job.from_dict(
+   {
+       "name": job_name ,
+       "tasks": [
+           {
+               "task_key": task_key,
+               "notebook_task": {
+                   "notebook_path": notebook_path,
+                   "source": "WORKSPACE",
+               },
+           },
+       ],
+   }
+)
+
+w = WorkspaceClient()
+j = w.jobs.create(**test_sdk.as_shallow_dict())
+
+print(f"View the job at {w.config.host}/#job/{j.job_id}\n")
+</pre>
+
+<h3>Run a job using the Python SDK</h3>
+<p>There are three ways to run a job when using the API.</p>
+<ul>
+    <li><strong>Scheduled</strong>. If the job definition (in JSON) includes a schedule, then the job will automatically run on the schedule.</li>
+    <li><strong>Trigger with <code>run-now</code></strong>. The <code>jobs.run_now</code> API triggers a run for a job that you have already created.</li>
+    <li><strong>Trigger with <code>submit</code></strong>. The <code>jobs.runs.submit</code> API takes a job definition and triggers a run for the job.</li>
+</ul>
+
+<h2>Get started with the Databricks REST API</h2>
+<div class="note">
+    <strong>Note:</strong> Databricks recommends using the <a href="https://docs.databricks.com/aws/en/dev-tools/cli/">Databricks CLI</a> and a <a href="https://docs.databricks.com/aws/en/dev-tools/sdks">Databricks SDK</a>, unless you are using a programming language that does not have a corresponding Databricks SDK.
+</div>
+
+<p>The following example makes a request to the Databricks REST API to retrieve details for a single job. It assumes the <code>DATABRICKS_HOST</code> and <code>DATABRICKS_TOKEN</code> environment variables have been set as described in <a href="https://docs.databricks.com/aws/en/dev-tools/auth/pat#token-auth">Perform personal access token authentication</a>.</p>
+
+<pre>
+$ curl --request GET "https://${DATABRICKS_HOST}/api/2.2/jobs/get" \
+     --header "Authorization: Bearer ${DATABRICKS_TOKEN}" \
+     --data '{ "job": "11223344" }'
+</pre>
+
+<p>For information on using the Databricks REST API see the <a href="https://docs.databricks.com/api/workspace/introduction">Databricks REST API reference documentation</a>.</p>
+
+<h2>View jobs as code</h2>
+<p>From the Databricks workspace you can view the JSON, YAML, or Python representation of a job.</p>
+
+<ol>
+    <li>
+        <p>In your Databricks workspace's sidebar, click <strong>Jobs &amp; Pipelines</strong> and select a job.</p>
+    </li>
+    <li>
+        <p>Click the kebab to the left of the <strong>Run now</strong> button, then click <strong>View as code</strong>:</p>
+        <p><img src="https://docs.databricks.com/aws/en/assets/images/view-as-code-menu-505554c89cac30dae15c336bf1b594bb.png" alt="View as code menu item" width="360"></p>
+    </li>
+    <li>
+        <p>Click <strong>YAML</strong>, <strong>Python</strong>, or <strong>JSON</strong> to view the job as code in that language.</p>
+        <ul>
+            <li>For YAML, click <strong>Copy</strong>, then paste the code directly into <a href="https://docs.databricks.com/aws/en/dev-tools/bundles/settings#resources">Databricks Asset Bundles configuration</a> <code>*.yaml</code> files to include the existing job in a bundle.</li>
+            <li>For Python, choose <strong>Databricks SDK</strong> or <strong>Databricks Asset Bundles</strong>, then click <strong>Copy</strong>.
+                <ul>
+                    <li>The Python code for the SDK can be used to create the job in notebooks or locally when using the <a href="https://docs.databricks.com/aws/en/dev-tools/sdk-python">Databricks Python SDK</a>.</li>
+                    <li>The Python code for bundles can be used to include the job in a bundle using Python. See <a href="https://docs.databricks.com/aws/en/dev-tools/bundles/python/">Bundle configuration in Python</a>.</li>
+                </ul>
+            </li>
+            <li>For JSON, click <strong>Copy</strong> and use the code to create, update, or get the job using the <a href="https://docs.databricks.com/aws/en/dev-tools/cli/">Databricks CLI</a>, the <a href="https://docs.databricks.com/aws/en/dev-tools/sdks">Databricks SDKs</a>, or the <a href="https://docs.databricks.com/api/workspace/introduction">Databricks REST API</a>.</li>
+        </ul>
+    </li>
+</ol>
+
+<h2>Clean up</h2>
+<p>To delete any jobs you just created, run <code>databricks jobs delete &lt;job-id&gt;</code> from the Databricks CLI or delete the job directly from the Databricks workspace UI.</p>
+
+<h2>Next steps</h2>
+<ul>
+    <li>To learn more about the Databricks CLI, see <a href="https://docs.databricks.com/aws/en/dev-tools/cli/">What is the Databricks CLI?</a> and <a href="https://docs.databricks.com/aws/en/dev-tools/cli/commands">Databricks CLI commands</a> to learn about other command groups.</li>
+    <li>To learn more about the Databricks SDK, see <a href="https://docs.databricks.com/aws/en/dev-tools/sdks">Databricks SDKs</a>.</li>
+    <li>To learn more about CI/CD using Databricks refer to <a href="https://docs.databricks.com/aws/en/dev-tools/bundles/">Databricks Asset Bundles</a> and <a href="https://docs.databricks.com/aws/en/dev-tools/terraform/">Databricks Terraform provider</a> and <a href="https://docs.databricks.com/aws/en/dev-tools/terraform/cdktf">Terraform CDKTF</a> for Databricks.</li>
+    <li>For a comprehensive overview of all developer tooling, see <a href="https://docs.databricks.com/aws/en/dev-tools/">Local development tools</a>.</li>
+</ul>
+
+</body>
+</html>

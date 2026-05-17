@@ -1,0 +1,152 @@
+FINE PARALLEL PROCESSING USING A WORK QUEUE
+================================================================================
+
+In this example, you will run a Kubernetes Job that runs multiple parallel
+tasks as worker processes, each running as a separate Pod.
+
+In this example, as each pod is created, it picks up one unit of work
+from a task queue, processes it, and repeats until the end of the queue is reached.
+
+OVERVIEW OF STEPS
+--------------------------------------------------------------------------------
+1. Start a storage service to hold the work queue. (We will use Redis).
+2. Create a queue, and fill it with messages.
+3. Start a Job that works on tasks from the queue.
+
+BEFORE YOU BEGIN
+--------------------------------------------------------------------------------
+You need to have a Kubernetes cluster, and the kubectl command-line tool must
+be configured.
+
+You will need a container image registry (like Docker Hub) where you can upload 
+images to run in your cluster.
+
+Documentation Link: https://kubernetes.io/docs/tasks/job/fine-parallel-processing-work-queue/
+
+--------------------------------------------------------------------------------
+STEP 1: STARTING REDIS
+--------------------------------------------------------------------------------
+For this example, you will start a single instance of Redis.
+
+Run the following commands:
+
+    kubectl apply -f https://k8s.io/examples/application/job/redis/redis-pod.yaml
+    kubectl apply -f https://k8s.io/examples/application/job/redis/redis-service.yaml
+
+--------------------------------------------------------------------------------
+STEP 2: FILLING THE QUEUE WITH TASKS
+--------------------------------------------------------------------------------
+Start a temporary interactive pod for running the Redis CLI:
+
+    kubectl run -i --tty temp --image redis --command "/bin/sh"
+
+Once the prompt appears, connect to Redis and fill the queue (named "job2"):
+
+    redis-cli -h redis
+
+    # Inside the redis prompt:
+    rpush job2 "apple"
+    rpush job2 "banana"
+    rpush job2 "cherry"
+    rpush job2 "date"
+    rpush job2 "fig"
+    rpush job2 "grape"
+    rpush job2 "lemon"
+    rpush job2 "melon"
+    rpush job2 "orange"
+
+    # Check the list:
+    lrange job2 0 -1
+
+--------------------------------------------------------------------------------
+STEP 3: CREATE A CONTAINER IMAGE
+--------------------------------------------------------------------------------
+You need a Python worker program to read from the queue.
+
+Here is the worker script (worker.py):
+
+    #!/usr/bin/env python
+    import time
+    import rediswq
+
+    host="redis"
+    # Uncomment next two lines if you do not have Kube-DNS working.
+    # import os
+    # host = os.getenv("REDIS_SERVICE_HOST")
+
+    q = rediswq.RedisWQ(name="job2", host=host)
+    print("Worker with sessionID: " +  q.sessionID())
+    print("Initial queue state: empty=" + str(q.empty()))
+    while not q.empty():
+      item = q.lease(lease_secs=10, block=True, timeout=2) 
+      if item is not None:
+        itemstr = item.decode("utf-8")
+        print("Working on " + itemstr)
+        time.sleep(10) # Put your actual work here instead of sleep.
+        q.complete(item)
+      else:
+        print("Waiting for work")
+    print("Queue empty, exiting")
+
+
+Build the image (requires Docker):
+
+    docker build -t job-wq-2 .
+
+Push the image to your registry (replace <username> with your Hub username):
+
+    docker tag job-wq-2 <username>/job-wq-2
+    docker push <username>/job-wq-2
+
+--------------------------------------------------------------------------------
+STEP 4: DEFINING A JOB
+--------------------------------------------------------------------------------
+Here is the manifest for the Job (job.yaml). 
+Note: Replace "gcr.io/myproject" with your image registry path.
+
+    apiVersion: batch/v1
+    kind: Job
+    metadata:
+      name: job-wq-2
+    spec:
+      parallelism: 2
+      template:
+        metadata:
+          name: job-wq-2
+        spec:
+          containers:
+          - name: c
+            image: gcr.io/myproject/job-wq-2
+          restartPolicy: OnFailure
+
+Note on Parallelism:
+In this example, each pod works on several items from the queue and then exits. 
+Workers signal the queue is empty by exiting with success.
+
+--------------------------------------------------------------------------------
+STEP 5: RUNNING THE JOB
+--------------------------------------------------------------------------------
+Run the Job:
+
+    kubectl apply -f ./job.yaml
+
+Check on the Job:
+
+    kubectl describe jobs/job-wq-2
+
+Wait for the Job to succeed:
+
+    kubectl wait --for=condition=complete --timeout=300s job/job-wq-2
+
+Check logs to see the work being done:
+
+    kubectl logs pods/job-wq-2-xxxxx
+
+--------------------------------------------------------------------------------
+ALTERNATIVES
+--------------------------------------------------------------------------------
+If you have a continuous stream of background processing work to run, consider 
+running your background workers with a ReplicaSet instead.
+
+Consider using a background processing library such as Resque:
+https://github.com/resque/resque
